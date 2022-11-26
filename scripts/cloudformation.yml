@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: 2010-09-09
+# Description: ---
+# Metadata: 
+
+# Parameters: 
+
+# Mappings: 
+
+# Conditions: 
+
+# Parameters:
+#   AppPassword:
+#     Description: This secure string parameter holds our application password
+#     Type: TK (String|Number|CommaDelimitedList)
+#     Default: /Production/AppPassword
+
+Resources:
+  BuildArtifactS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      AccessControl: Private
+      BucketName: cfn-codebuild-artifacts
+      VersioningConfiguration:
+        Status: Enabled
+
+  IAMRoleForCodeBuild:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: 
+        Version: '2012-10-17'
+        Statement:
+          - Action: ['sts:AssumeRole']
+            Effect: Allow
+            Principal:
+              Service: [codebuild.amazonaws.com]
+      Policies:
+        - PolicyName: "CodeBuildAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                - 'ssm:GetParameters'
+                - 'logs:*'
+                Effect: "Allow"
+                Resource: "*"
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn:
+      - BuildArtifactS3Bucket
+      - IAMRoleForCodeBuild 
+    Properties:
+      ServiceRole: !GetAtt IAMRoleForCodeBuild.Arn
+      Artifacts:
+        Type: S3
+        Location: cfn-codebuild-artifacts
+        Name: buildArtifact.zip
+        Packaging: ZIP
+        Path: deploy-nodejs-cicd
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:6.0
+        EnvironmentVariables:
+          - Name: PASSWORD
+            Value: /Production/AppPassword
+            Type: PARAMETER_STORE
+      Source:
+        Type: GITHUB
+        Location: https://github.com/Rishabh570/deploy-nodejs-aws-cicd.git
+        Auth:
+          Type: OAUTH # Need to manually connect your GitHub account to CodeBuild from console (only required once)
+      Triggers:
+        Webhook: true
