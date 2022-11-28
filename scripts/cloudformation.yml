@@ -1,18 +1,10 @@
 AWSTemplateFormatVersion: 2010-09-09
-# Description: ---
-# Metadata: 
 
-# Parameters: 
-
-# Mappings: 
-
-# Conditions: 
-
-# Parameters:
-#   AppPassword:
-#     Description: This secure string parameter holds our application password
-#     Type: TK (String|Number|CommaDelimitedList)
-#     Default: /Production/AppPassword
+Parameters:
+  SSHKeyPairKeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: This secure string parameter holds our application password
+    Default: SSHKeyPairKeyName
 
 Resources:
   BuildArtifactS3Bucket:
@@ -42,6 +34,8 @@ Resources:
               - Action:
                 - 'ssm:GetParameters'
                 - 'logs:*'
+                - 's3:*'
+                - 'codedeploy:*'
                 Effect: "Allow"
                 Resource: "*"
 
@@ -71,5 +65,131 @@ Resources:
         Location: https://github.com/Rishabh570/deploy-nodejs-aws-cicd.git
         Auth:
           Type: OAUTH # Need to manually connect your GitHub account to CodeBuild from console (only required once)
+      SourceVersion: cloudformation
       Triggers:
         Webhook: true
+
+
+  CodeRevisionS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      AccessControl: Private
+      BucketName: cfn-codedeploy-revisions
+      VersioningConfiguration:
+        Status: Enabled
+    DeletionPolicy: "Retain"
+
+  EC2IAMRoleForCodeDeploy:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: 
+        Version: '2012-10-17'
+        Statement:
+          - Action: ['sts:AssumeRole']
+            Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+      Policies:
+        - PolicyName: "CodeDeployAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                - 's3:*'
+                - 's3-object-lambda:*'
+                Effect: "Allow"
+                Resource: "arn:aws:s3:::cfn-codedeploy-revisions/*"
+  
+  EC2IAMInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2IAMRoleForCodeDeploy
+
+  SSHSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SSH and HTTP
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        FromPort: 22
+        IpProtocol: tcp
+        ToPort: 22
+      - CidrIp: 0.0.0.0/0
+        FromPort: 80
+        IpProtocol: tcp
+        ToPort: 80
+
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - SSHSecurityGroup
+    DeletionPolicy: "Retain"
+    Properties:
+      IamInstanceProfile: !Ref EC2IAMInstanceProfile
+      KeyName: !Ref SSHKeyPairKeyName
+      AvailabilityZone: ap-south-1a
+      ImageId: ami-074dc0a6f6c764218
+      InstanceType: t2.micro
+      Monitoring: false
+      SecurityGroups:
+        - !Ref SSHSecurityGroup
+      UserData: !Base64 |
+        #!/bin/bash -xe
+        sudo yum update -y
+        sudo yum install -y ruby wget
+        wget https://aws-codedeploy-eu-west-1.s3.eu-west-1.amazonaws.com/latest/install
+        chmod +x ./install
+        sudo ./install auto
+      Tags:
+        - Key: environment
+          Value: development
+        - Key: name
+          Value: webserver
+
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+      AssumeRolePolicyDocument: 
+        Version: '2012-10-17'
+        Statement:
+          - Action: ['sts:AssumeRole']
+            Effect: Allow
+            Principal:
+              Service: [codedeploy.amazonaws.com]
+
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    DeletionPolicy: "Retain"
+    DependsOn: MyEC2Instance
+    Properties:
+      ApplicationName: cfn-codedeploy-application
+  
+  CodeDeployDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    DependsOn: CodeDeployApplication
+    DeletionPolicy: "Retain"
+    Properties:
+      ApplicationName: cfn-codedeploy-application 
+      ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+      # ServiceRoleArn: arn:aws:iam::002539553384:policy/service-role/AWSCodeDeployRole
+      Ec2TagFilters:
+        - Key: environment
+          Type: KEY_AND_VALUE
+          Value: development
+      # Deployment:
+      #   Description: CodeDeploy deployment
+      #   Revision:
+      #     RevisionType: S3
+      #     S3Location:
+      #       Bucket: cfn-codedeploy-revisions
+      #       BundleType: zip
+      #       Key: revision.zip
+        # IgnoreApplicationStopFailures: false
+      DeploymentGroupName: development
+      DeploymentConfigName: CodeDeployDefault.OneAtATime

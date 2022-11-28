@@ -1,7 +1,7 @@
 version: 0.0
 os: linux
 files:
-  - source: /index.js
+  - source: /
     destination: /deploy-nodejs-aws-cicd
 hooks:
   BeforeInstall:
