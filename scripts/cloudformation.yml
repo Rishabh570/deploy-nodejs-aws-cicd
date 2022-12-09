@@ -67,7 +67,7 @@ Resources:
           Type: OAUTH # Need to manually connect your GitHub account to CodeBuild from console (only required once)
       SourceVersion: cloudformation
       Triggers:
-        Webhook: true
+        Webhook: true # to specify particular events to trigger a build => https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-codebuild-project-webhookfilter.html
 
 
   CodeRevisionS3Bucket:
@@ -77,7 +77,6 @@ Resources:
       BucketName: cfn-codedeploy-revisions
       VersioningConfiguration:
         Status: Enabled
-    DeletionPolicy: "Retain"
 
   EC2IAMRoleForCodeDeploy:
     Type: AWS::IAM::Role
@@ -113,7 +112,7 @@ Resources:
     Properties:
       GroupDescription: SSH and HTTP
       SecurityGroupIngress:
-      - CidrIp: 0.0.0.0/0
+      - CidrIp: 0.0.0.0/0 # SSH access from everywhere shouldn't be allowed
         FromPort: 22
         IpProtocol: tcp
         ToPort: 22
@@ -126,12 +125,11 @@ Resources:
     Type: AWS::EC2::Instance
     DependsOn:
       - SSHSecurityGroup
-    DeletionPolicy: "Retain"
     Properties:
       IamInstanceProfile: !Ref EC2IAMInstanceProfile
       KeyName: !Ref SSHKeyPairKeyName
       AvailabilityZone: ap-south-1a
-      ImageId: ami-074dc0a6f6c764218
+      ImageId: ami-0e8bfae08669b4b89
       InstanceType: t2.micro
       Monitoring: false
       SecurityGroups:
@@ -143,6 +141,11 @@ Resources:
         wget https://aws-codedeploy-eu-west-1.s3.eu-west-1.amazonaws.com/latest/install
         chmod +x ./install
         sudo ./install auto
+        wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.34.0/install.sh | bash
+        . ~/.nvm/nvm.sh
+        nvm install v16.0.0
+        node -e "console.log('Running Node.js ' + process.version)"
+        npm i pm2 -g
       Tags:
         - Key: environment
           Value: development
@@ -165,7 +168,6 @@ Resources:
 
   CodeDeployApplication:
     Type: AWS::CodeDeploy::Application
-    DeletionPolicy: "Retain"
     DependsOn: MyEC2Instance
     Properties:
       ApplicationName: cfn-codedeploy-application
@@ -173,23 +175,12 @@ Resources:
   CodeDeployDeploymentGroup:
     Type: AWS::CodeDeploy::DeploymentGroup
     DependsOn: CodeDeployApplication
-    DeletionPolicy: "Retain"
     Properties:
       ApplicationName: cfn-codedeploy-application 
       ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
-      # ServiceRoleArn: arn:aws:iam::002539553384:policy/service-role/AWSCodeDeployRole
       Ec2TagFilters:
         - Key: environment
           Type: KEY_AND_VALUE
           Value: development
-      # Deployment:
-      #   Description: CodeDeploy deployment
-      #   Revision:
-      #     RevisionType: S3
-      #     S3Location:
-      #       Bucket: cfn-codedeploy-revisions
-      #       BundleType: zip
-      #       Key: revision.zip
-        # IgnoreApplicationStopFailures: false
       DeploymentGroupName: development
       DeploymentConfigName: CodeDeployDefault.OneAtATime
